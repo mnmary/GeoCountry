@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Geo Service Panel</title>
+
+  <!-- Pico.css -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+
+  <!-- Vue.js (production build) -->
+  <script src="https://cdn.jsdelivr.net/npm/vue@3/dist/vue.global.prod.js"></script>
+      <!-- Axios -->
+  <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+</head>
+<body>
+
+    <!-- Главный контейнер страницы -->
+    <main class="container" id="app">
+
+        <!-- Шапка -->
+        <header>
+            <h2 style="margin: 0;">🌍 GeoCountry</h2>
+            <p v-if="isAuthorized" style="font-size: 0.9rem; color: gray;">
+                Вы вошли как: <strong>{{ userEmail }}</strong> [{{ userRole }}] |
+                <a href="#" @click.prevent="logout" style="color: red;">Выйти</a>
+            </p>
+        </header>
+
+        <!-- Сетка: левая и правая панель -->
+        <div class="grid">
+
+            <!-- ЛЕВАЯ ПАНЕЛЬ: АВТОРИЗАЦИЯ И ПРОФИЛЬ -->
+            <div>
+                <!-- Форма если НЕ авторизован -->
+                <article v-if="!isAuthorized">
+                    <nav style="margin-bottom: 1rem;">
+                        <ul>
+                            <li><strong @click="authMode = 'login'" style="cursor:pointer;" :style="authMode === 'login' ? 'color:var(--pico-primary);' : ''">Вход</strong></li>
+                            <li><strong @click="authMode = 'register'" style="cursor:pointer;" :style="authMode === 'register' ? 'color:var(--pico-primary);' : ''">Регистрация</strong></li>
+                        </ul>
+                    </nav>
+
+                    <form @submit.prevent="handleAuth">
+                        <label>Email
+                            <input v-model="authForm.email" type="email" required placeholder="name@example.com">
+                        </label>
+                        <label>Пароль
+                            <input v-model="authForm.password" type="password" required>
+                        </label>
+                        <label v-if="authMode === 'register'">Повтор пароля
+                            <input v-model="authForm.password_confirm" type="password" required>
+                        </label>
+
+                        <button type="submit">
+                            {{ authMode === 'login' ? 'Войти' : 'Создать аккаунт' }}
+                        </button>
+                    </form>
+
+                    <p v-if="errorMessage" style="color: red; background: rgba(255,0,0,0.1); padding: 0.5rem; border-radius: 4px;">{{ errorMessage }}</p>
+                    <p v-if="successMessage" style="color: green; background: rgba(0,255,0,0.1); padding: 0.5rem; border-radius: 4px;">{{ successMessage }}</p>
+                </article>
+
+                <!-- Панель профиля если авторизован -->
+                <article v-else>
+                    <h5>ℹ️ Ваш профиль</h5>
+                    <p><strong>Email:</strong> {{ userEmail }}</p>
+                    <p><strong>Роль:</strong> {{ userRole }}</p>
+                </article>
+            </div>
+
+            <!-- ПРАВАЯ ПАНЕЛЬ: ИНСТРУМЕНТЫ И ИСТОРИЯ -->
+            <div style="grid-column: span 2;">
+                <!-- Если не авторизован -->
+                <article v-if="!isAuthorized" style="text-align: center; padding: 3rem 1rem;">
+                    <h3>🔒 Доступ ограничен</h3>
+                    <p>Пожалуйста, авторизуйтесь слева для работы с гео-сервисом.</p>
+                </article>
+
+                <!-- Если залогинен -->
+                <div v-else>
+                    <!-- Поиск страны -->
+                    <article>
+                        <h5>🔍 Найти страну</h5>
+                        <form @submit.prevent="getCountry" class="grid">
+                            <input v-model.number="geoForm.latitude" type="number" step="any" min="-90" max="90" required placeholder="Широта (Lat)">
+                            <input v-model.number="geoForm.longitude" type="number" step="any" min="-180" max="180" required placeholder="Долгота (Lon)">
+                            <button type="submit">Отправить</button>
+                        </form>
+                        <h4 v-if="searchResult" style="margin-top: 1rem; text-align: center;">📍 Страна: {{ searchResult }}</h4>
+                        <p v-if="geoError" style="color: red;">{{ geoError }}</p>
+                    </article>
+
+                    <!-- Таблица истории -->
+                    <article>
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                            <h5 style="margin: 0;">📋 История запросов</h5>
+                            <a href="#" @click.prevent="loadHistory">Обновить</a>
+                        </div>
+
+                        <figure v-if="history.length > 0">
+                            <table class="striped">
+                                <thead>
+                                    <tr>
+                                        <th>Страна</th>
+                                        <th>Координаты</th>
+                                        <th>Пользователь</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr v-for="item in history" :key="item.id">
+                                        <td><strong>{{ item.country }}</strong></td>
+                                        <td>{{ Number(item.lat).toFixed(2) }}, {{ Number(item.lon).toFixed(2) }}</td>
+                                        <td>{{ item.owner?.email }} ({{ item.owner?.role }})</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </figure>
+                        <p v-else style="color: gray; text-align: center;">История пуста...</p>
+                    </article>
+                </div>
+            </div>
+
+        </div>
+    </main>
+
+    <!-- ЛОГИКА VUE 3 И СЕТЕВЫЕ НАСТРОЙКИ -->
+    <script>
+        // Пропиши сюда IP-адрес своего компьютера, если будешь запускать на 0.0.0.0
+        const API_URL = 'http://127.0.0.1:8000';
+        const api = axios.create({ baseURL: API_URL });
+
+
+       // Авто-подстановка токена
+        api.interceptors.request.use(config => {
+            const token = localStorage.getItem('access_token');
+            if (token) config.headers['Authorization'] = `Bearer ${token}`;
+            return config;
+        });
+
+        // Авто-обновление токена (Интерцептор)
+        api.interceptors.response.use(
+            response => response,
+            async error => {
+                const originalRequest = error.config;
+                if (error.response && error.response.status === 401 && !originalRequest._retry) {
+                    originalRequest._retry = true;
+                    try {
+                        const refreshToken = localStorage.getItem('refresh_token');
+                        const res = await axios.post(`${API_URL}/auth/refresh`, { refresh_token: refreshToken });
+                        if (res.status === 200) {
+                            localStorage.setItem('access_token', res.data.access_token);
+                            localStorage.setItem('refresh_token', res.data.refresh_token);
+                            originalRequest.headers['Authorization'] = `Bearer ${res.data.access_token}`;
+                            return api(originalRequest);
+                        }
+                    } catch (refreshError) {
+                        localStorage.clear();
+                        window.location.reload();
+                    }
+                }
+                return Promise.reject(error);
+            }
+        );
+        const { createApp, ref, onMounted } = Vue;
+        createApp({
+            setup() {
+                const isAuthorized = ref(false);
+                const userEmail = ref('');
+                const userRole = ref('user');
+                const authMode = ref('login');
+                const authForm = ref({ email: '', password: '', password_confirm: '' });
+                const geoForm = ref({ latitude: '', longitude: '' });
+                const history = ref([]);
+                const searchResult = ref('');
+                const errorMessage = ref('');
+                const successMessage = ref('');
+                const geoError = ref('');
+
+                onMounted(() => {
+                    const email = localStorage.getItem('user_email');
+                    const role = localStorage.getItem('user_role');
+                    if (email && localStorage.getItem('access_token')) {
+                        isAuthorized.value = true;
+                        userEmail.value = email;
+                        userRole.value = role || 'user';
+                        loadHistory();
+                    }
+                });
+
+                const clearMessages = () => { errorMessage.value = ''; successMessage.value = ''; };
+
+                const handleAuth = async () => {
+                    clearMessages();
+                    try {
+                        if (authMode.value === 'register') {
+                            await api.post('/users/register', authForm.value);
+                            successMessage.value = 'Аккаунт создан! Перейдите на вкладку Вход.';
+                        } else {
+                            const params = new URLSearchParams();
+                            params.append('username', authForm.value.email);
+                            params.append('password', authForm.value.password);
+
+                            const res = await api.post('/users/login', params, {headers: { 'Content-Type': 'application/x-www-form-urlencoded' }});
+                            localStorage.setItem('access_token', res.data.access_token);
+                            localStorage.setItem('refresh_token', res.data.refresh_token);
+                            localStorage.setItem('user_email', authForm.value.email);
+                            isAuthorized.value = true;userEmail.value = authForm.value.email;
+                            await loadHistory();
+                        }}
+                    catch (err) {
+                        errorMessage.value = err.response?.data?.detail || 'Ошибка операции';
+                    }};
+                const getCountry = async () => {
+                    geoError.value = '';
+                    searchResult.value = '';
+                    try {
+                        const res = await api.get('/geo/get_country/', {params: { lat: geoForm.value.latitude, lon: geoForm.value.longitude }});
+                        searchResult.value = res.data.country;
+                        await loadHistory();
+                    }
+                    catch (err) {
+                        geoError.value = err.response?.data?.detail || 'Ошибка';
+                    }};
+                const loadHistory = async () => {try {const res = await api.get('/geo/get_history');
+                    history.value = res.data;
+                    const myRec = history.value.find(h => h.owner?.email === userEmail.value);
+                    if (myRec) {userRole.value = myRec.owner.role;localStorage.setItem('user_role', userRole.value);
+                    }}
+                catch (err) {
+                    console.error(err);
+                }};
+                const logout = async () => {try {const token = localStorage.getItem('refresh_token');
+                    if (token) await api.post('/users/logout', { refresh_token: token });
+                }
+                catch (e) {
+
+                }
+                localStorage.clear();
+                isAuthorized.value = false;
+                history.value = [];
+                searchResult.value = '';
+                };
+                return {isAuthorized, userEmail, userRole, authMode, authForm, geoForm,history, searchResult, errorMessage, successMessage, geoError,handleAuth, getCountry, loadHistory, logout, clearMessages};
+            }}).mount('#app');
+    </script>
+</body>
+</html>
