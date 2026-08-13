@@ -194,7 +194,7 @@
                     clearMessages();
                     try {
                         if (authMode.value === 'register') {
-                            await api.post('/users/register', authForm.value);
+                            await api.post('/users', authForm.value);
                             successMessage.value = 'Аккаунт создан! Перейдите на вкладку Вход.';
                         } else {
                             const params = new URLSearchParams();
