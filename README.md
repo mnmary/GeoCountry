@@ -52,7 +52,7 @@ Frontend обращается к следующим эндпоинтам:
 |-------|---------------------------|-----------------------------------------------|
 | POST  | `/users`                  | Регистрация нового пользователя               |
 | POST  | `/users/login`             | Вход (form-urlencoded: `username`, `password`), возвращает `access_token` и `refresh_token` |
-| POST  | `/auth/refresh`            | Обновление токена по `refresh_token`          |
+| POST  | `/users/refresh`            | Обновление токена по `refresh_token`          |
 | POST  | `/users/logout`            | Выход, инвалидация `refresh_token`             |
 | GET   | `/geo/get_country/`        | Определение страны по параметрам `lat`, `lon` |
 | GET   | `/geo/get_history`          | Получение истории запросов (с данными о владельце: email, role) |
@@ -62,7 +62,7 @@ Access-токен передаётся автоматически в загол�
 ## Аутентификация
 
 - Токены (`access_token`, `refresh_token`) и данные пользователя (`user_email`, `user_role`) хранятся в `localStorage`.
-- При получении `401 Unauthorized` interceptor автоматически пытается обновить `access_token` через `/auth/refresh` и повторяет исходный запрос.
+- При получении `401 Unauthorized` interceptor автоматически пытается обновить `access_token` через `/users/refresh` и повторяет исходный запрос.
 - Если обновление токена не удалось — `localStorage` очищается и страница перезагружается.
 
 ## ⚠️ Замечания по безопасности
